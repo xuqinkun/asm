@@ -1,0 +1,15 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "NASM: Build and Run",
+            "type": "shell",
+            "command": "nasm  ${file} -o ${fileDirname}\\${fileBasenameNoExtension}.o && gcc ${fileDirname}\\${fileBasenameNoExtension}.o -o ${fileDirname}\\${fileBasenameNoExtension}.exe",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"]
+        }
+    ]
+}
