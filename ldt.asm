@@ -2,6 +2,8 @@ DA_32   EQU 4000h ; 32位代码段
 DA_C    EQU 98h   ; 只执行代码段的属性
 DA_DRW  EQU 92h   ; 可读写的数据段
 DA_DRWA EQU 93h   ; 存在的，已访问的，可读写的
+DA_LDT  EQU 82h   ; 局部描述符
+SA_TIL  EQU 4     ; 具体的任务
 
 %macro Descriptor 3
     dw %2 & 0FFFFh         ;段界限0~15  (2字节)
@@ -17,13 +19,15 @@ org 0100h          ; dos下调试程序，0100是可用区域
 
 [SECTION .gdt]
 
-;GDT                           段基址，     段界限，           属性
-PM_GDT:           Descriptor   0         , 0           ,      0
-PM_DESC_CODE32:   Descriptor   0         , SegCode32Len - 1,  DA_C    + DA_32
-PM_DESC_DATA:     Descriptor   0         , DATALen-1       ,  DA_DRW
-PM_DESC_STACK:    Descriptor   0         , TopOfStack      ,  DA_DRWA + DA_32
-PM_DESC_TEST :    Descriptor   0200000h  , 0FFFFh          ,  DA_DRW
-PM_DESC_VIDEO:    Descriptor   0B8000h   , 0FFFFh          ,  DA_DRW
+;GDT                           段基址，     段界限，          属性
+PM_GDT:           Descriptor   0         , 0              ,  0
+PM_DESC_CODE32:   Descriptor   0         , SegCode32Len - 1, DA_C    + DA_32
+PM_DESC_DATA:     Descriptor   0         , DATALen-1       , DA_DRW
+PM_DESC_STACK:    Descriptor   0         , TopOfStack      , DA_DRWA + DA_32
+PM_DESC_TEST :    Descriptor   0200000h  , 0FFFFh          , DA_DRW
+PM_DESC_VIDEO:    Descriptor   0B8000h   , 0FFFFh          , DA_DRW
+
+LABEL_DESC_LDT:   Descriptor   0         , LDTLen - 1      , DA_LDT
 ;end of definition gdt
 GdtLen equ $ - PM_GDT
 GdtPtr dw GdtLen - 1
@@ -35,6 +39,7 @@ SelectorDATA   equ PM_DESC_DATA   - PM_GDT
 SelectorSTACK  equ PM_DESC_STACK  - PM_GDT
 SelectorTEST   equ PM_DESC_TEST   - PM_GDT
 SelectorVIDEO  equ PM_DESC_VIDEO  - PM_GDT
+SelectorLDT    equ LABEL_DESC_LDT - PM_GDT
 
 ;End of [SECTION .gdt]
 
@@ -96,6 +101,26 @@ PM_BEGIN:
    mov byte [PM_DESC_STACK+4], al
    mov byte [PM_DESC_STACK+7], ah
 
+   ;初始化32位的LDT，得把省局注册到全国
+   xor eax,eax
+   mov ax,ds
+   shl eax,4
+   add eax, LABEL_LDT
+   mov word [LABEL_DESC_LDT+2], ax
+   shr eax,16
+   mov byte [LABEL_DESC_LDT+4], al
+   mov byte [LABEL_DESC_LDT+7], ah
+
+   ;根据GDT，初始化LDT
+   xor eax,eax
+   mov ax,ds
+   shl eax,4
+   add eax, LABEL_CODE_A
+   mov word [LABEL_LDT_DESC_CODEA+2], ax
+   shr eax,16
+   mov byte [LABEL_LDT_DESC_CODEA+4], al
+   mov byte [LABEL_LDT_DESC_CODEA+7], ah
+
    ; 加载GDTR
    xor eax,eax
    mov ax,ds
@@ -129,6 +154,12 @@ PM_SEG_CODE32:
    mov ax,SelectorVIDEO
    mov gs,ax
 
+   mov ax,0b800h
+   mov ds,ax
+
+   mov byte [0],'A'
+   mov byte [1],0ch
+
    mov ax,SelectorSTACK
    mov ss,ax
    mov esp,TopOfStack
@@ -148,16 +179,34 @@ PM_SEG_CODE32:
    add edi,2
    jmp .1
 .2:
-   mov ax, 'A'
-   mov [es:0],ax
-   mov ax,SelectorVIDEO
-   mov gs,ax
-   mov edi,(80*15+0)*2
-   mov ah,0Ch
-   mov al,[es:0]
-   mov [gs:edi],ax
+   mov ax,SelectorLDT
+   lldt ax
+   jmp SelectorLDTCodeA:0
 
    jmp $
 
 
 SegCode32Len equ $-PM_SEG_CODE32
+
+;LDT
+[SECTION .ldt]
+ALIGN 32
+
+LABEL_LDT: ;                     段基址，   段界限，    属性
+LABEL_LDT_DESC_CODEA:  Descriptor  0,   CodeALen-1,   DA_C+DA_32
+
+LDTLen equ $ - LABEL_LDT
+SelectorLDTCodeA equ LABEL_LDT_DESC_CODEA - LABEL_LDT + SA_TIL
+
+[SECTION .la]
+ALIGN 32
+[BITS 32]
+LABEL_CODE_A:
+   mov ax,SelectorVIDEO
+   mov gs,ax
+   mov edi, (80*5 + 0) * 2
+   mov ah,0ch
+   mov al, 'D'
+   mov [gs:edi],ax
+   jmp $
+CodeALen equ $ - LABEL_CODE_A
